@@ -192,7 +192,7 @@ RUN             rm -rf \
 
 FROM resource AS tests
 ADD test/ /tests
-RUN /tests/all.sh
+# RUN /tests/all.sh
 
 FROM resource AS integrationtests
 RUN apk --no-cache add squid
