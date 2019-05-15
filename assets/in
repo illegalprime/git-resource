@@ -46,6 +46,7 @@ commit_verification_key_ids=$(jq -r '(.source.commit_verification_key_ids // [])
 commit_verification_keys=$(jq -r '(.source.commit_verification_keys // [])[]' < $payload)
 tag_filter=$(jq -r '.source.tag_filter // ""' < $payload)
 gpg_keyserver=$(jq -r '.source.gpg_keyserver // "hkp://ipv4.pool.sks-keyservers.net/"' < $payload)
+dyn_paths=$(jq -r '.source.dyn_paths // ""' < $payload)
 disable_git_lfs=$(jq -r '(.params.disable_git_lfs // false)' < $payload)
 clean_tags=$(jq -r '(.params.clean_tags // false)' < $payload)
 short_ref_format=$(jq -r '(.params.short_ref_format // "%s")' < $payload)
@@ -192,6 +193,24 @@ metadata=$(git_metadata)
 
 if [ "$clean_tags" == "true" ]; then
   git tag | xargs git tag -d
+fi
+
+# prune paths if necessary
+if [[ -f ${dyn_paths:-} ]]; then
+  mapfile -t match_paths < "$dyn_paths"
+  mapfile -t all_paths < <( find . | sed 's,^\./,,g' | grep -v '^\.$' )
+  match_paths+=('/.git')
+
+  for mod_path in "${all_paths[@]}"; do
+    delete=1
+    for matcher in "${match_paths[@]}"; do
+      if [[ "/${mod_path}" =~ ^"$matcher/" \
+	 || "$matcher" =~ ^"/${mod_path}/" \
+	 || "/${mod_path}" == "$matcher" ]]
+      then delete=0; break; fi
+    done
+    if [[ $delete == 1 ]]; then rm -rf "$mod_path"; fi
+  done
 fi
 
 jq -n "{
