@@ -23,6 +23,7 @@ configure_credentials $payload
 uri=$(jq -r '.source.uri // ""' < $payload)
 branch=$(jq -r '.source.branch // ""' < $payload)
 paths="$(jq -r '(.source.paths // ["."])[]' < $payload)" # those "'s are important
+dyn_paths=$(jq -r '.source.dyn_paths // ""' < $payload)
 ignore_paths="$(jq -r '":!" + (.source.ignore_paths // [])[]' < $payload)" # these ones too
 tag_filter=$(jq -r '.source.tag_filter // ""' < $payload)
 git_config_payload=$(jq -r '.source.git_config // []' < $payload)
@@ -94,6 +95,27 @@ get_commit(){
   done
 }
 
+dyn_paths_changed() {
+  local commit="$1"
+  local dyn_paths="$2"
+  # go to that commit in history
+  git checkout "$commit"
+  # look at the paths at that point in history
+  if [[ -f "$dyn_paths" ]]; then
+    # get the match list and list of files changed in that commit
+    mapfile -t match_paths < "$dyn_paths"
+    mapfile -t mod_paths < <(
+        git diff-tree --no-commit-id --name-only -r "$commit"
+    )
+    for mod_path in "${mod_paths[@]}"; do
+      for matcher in "${match_paths[@]}"; do
+        if [[ "/${mod_path}" =~ ^"$matcher/" || "/${mod_path}" == "$matcher" ]]
+        then echo "$commit"; return; fi
+      done
+    done
+  fi
+}
+
 if [ -n "$tag_filter" ]; then
   {
     if [ -n "$ref" ] && [ -n "$branch" ]; then
@@ -107,6 +129,17 @@ if [ -n "$tag_filter" ]; then
       get_commit $tag
     fi
   } | jq -s "map(.)" >&3
+elif [ -n "$dyn_paths" ]; then
+  # get all the commits we have to check
+  mapfile -t commits < <(
+    git log $ci_skip --format='%H' --first-parent $log_range
+  )
+  # go through each one and check if the paths there have changed
+  (
+    for commit in "${commits[@]}"; do
+      dyn_paths_changed "$commit" "$dyn_paths"
+    done
+  ) | jq -R . | jq -s "map({ref: .})" >&3
 else
   {
     set -f
